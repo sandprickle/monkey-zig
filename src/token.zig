@@ -17,8 +17,8 @@ pub const Token = struct {
         _ = options;
 
         try writer.print(
-            "Token{c} .type = {any}, .literal = {c}{s}{c} {c}",
-            .{ '{', self.type, '"', self.literal, '"', '}' },
+            "| {s}\t{c}{s}{c}",
+            .{ self.type.toStr(), '"', self.literal, '"' },
         );
     }
 };
@@ -74,6 +74,39 @@ pub const TokenType = enum {
     _if,
     _else,
     _return,
+
+    const Self = @This();
+
+    pub fn toStr(self: *const Self) []const u8 {
+        return switch (self.*) {
+            .illegal => "illegal ",
+            .ident => "ident   ",
+            .int => "int     ",
+            .assign => "assign  ",
+            .plus => "plus    ",
+            .minus => "minus   ",
+            .asterisk => "asterisk",
+            .slash => "slash  ",
+            .bang => "bang    ",
+            .gt => "gt      ",
+            .lt => "lt      ",
+            .eq => "eq      ",
+            .not_eq => "not_eq  ",
+            .comma => "comma   ",
+            .semicolon => "semicolon",
+            .l_paren => "l_paren",
+            .r_paren => "r_paren ",
+            .l_brace => "l_brace",
+            .r_brace => "r_brace",
+            .function => "function",
+            .let => "let     ",
+            ._true => "true    ",
+            ._false => "false   ",
+            ._if => "if      ",
+            ._else => "else    ",
+            ._return => "return  ",
+        };
+    }
 };
 
 /// Valid Monkey keywords
