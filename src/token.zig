@@ -7,15 +7,6 @@ pub const Token = struct {
     type: TokenType,
     literal: []const u8,
 
-    pub fn new(token_type: TokenType, literal: []const u8) Self {
-        const t = Self{
-            .type = token_type,
-            .literal = literal,
-        };
-
-        return t;
-    }
-
     pub fn format(
         self: Self,
         comptime fmt: []const u8,
@@ -32,10 +23,19 @@ pub const Token = struct {
     }
 };
 
-test Token {
+pub fn new(token_type: TokenType, literal: []const u8) Token {
+    const t = Token{
+        .type = token_type,
+        .literal = literal,
+    };
+
+    return t;
+}
+
+test new {
     try expectEqual(
         Token{ .type = .ident, .literal = "foo" },
-        Token.new(TokenType.ident, "foo"),
+        new(TokenType.ident, "foo"),
     );
 }
 
