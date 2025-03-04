@@ -1,4 +1,4 @@
-const lexer = @import("lexer.zig");
+const Lexer = @import("lexer.zig").Lexer;
 const token = @import("token.zig");
 
 const std = @import("std");
@@ -15,10 +15,12 @@ pub fn start(
         _ = try out.writeAll(PROMPT);
         const input = try in.readUntilDelimiterOrEofAlloc(allocator, '\n', 1024);
         if (input) |line| {
-            var lex = lexer.new(line);
+            var lex = Lexer.init(line);
 
-            while (lex.nextToken()) |tok| {
-                try out.print("{any}\n", .{tok});
+            var currentToken = lex.nextToken();
+            while (currentToken.type != .eof) {
+                try out.print("{any}\n", .{currentToken});
+                currentToken = lex.nextToken();
             }
         }
     }

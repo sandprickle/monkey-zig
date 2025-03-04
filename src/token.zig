@@ -1,11 +1,26 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
+const assert = std.debug.assert;
 
 pub const Token = struct {
     const Self = @This();
 
     type: TokenType,
     literal: []const u8,
+
+    pub fn new(comptime token_type: TokenType, literal: []const u8) Self {
+        // assert(!std.mem.eql(u8, literal, ""));
+
+        const predefined_literal = token_type.literal();
+        if (predefined_literal) |lit| {
+            assert(std.mem.eql(u8, literal, lit));
+        }
+
+        return Self{
+            .type = token_type,
+            .literal = literal,
+        };
+    }
 
     pub fn format(
         self: Self,
@@ -18,6 +33,7 @@ pub const Token = struct {
 
         const t_type = switch (self.type) {
             .illegal => "illegal ",
+            .eof => "EOF ",
             .ident => "ident   ",
             .int => "int     ",
             .assign => "assign  ",
@@ -52,24 +68,23 @@ pub const Token = struct {
     }
 };
 
-pub fn new(token_type: TokenType, literal: []const u8) Token {
-    const t = Token{
-        .type = token_type,
-        .literal = literal,
-    };
-
-    return t;
-}
-
-test new {
+test "Token.new" {
     try expectEqual(
         Token{ .type = .ident, .literal = "foo" },
-        new(TokenType.ident, "foo"),
+        Token.new(TokenType.ident, "foo"),
+    );
+
+    try expectEqual(
+        Token{ .type = .lt, .literal = "<" },
+        Token.new(.lt, "<"),
     );
 }
 
 pub const TokenType = enum {
+    const Self = @This();
+
     illegal,
+    eof,
 
     // Idenetifiers + Literals
     ident,
@@ -103,22 +118,53 @@ pub const TokenType = enum {
     _if,
     _else,
     _return,
-};
 
-/// Valid Monkey keywords
-const keywords = [_]Token{
-    Token{ .literal = "fn", .type = .function },
-    Token{ .literal = "let", .type = .let },
-    Token{ .literal = "true", .type = ._true },
-    Token{ .literal = "false", .type = ._false },
-    Token{ .literal = "if", .type = ._if },
-    Token{ .literal = "else", .type = ._else },
-    Token{ .literal = "return", .type = ._return },
+    fn literal(self: Self) ?[]const u8 {
+        const result = switch (self) {
+            TokenType.eof => "",
+            TokenType.assign => "=",
+            TokenType.plus => "+",
+            TokenType.minus => "-",
+            TokenType.asterisk => "*",
+            TokenType.slash => "/",
+            TokenType.bang => "!",
+            TokenType.gt => ">",
+            TokenType.lt => "<",
+            TokenType.eq => "==",
+            TokenType.not_eq => "!=",
+            TokenType.comma => ",",
+            TokenType.semicolon => ";",
+            TokenType.l_paren => "(",
+            TokenType.r_paren => ")",
+            TokenType.l_brace => "{",
+            TokenType.r_brace => "}",
+            TokenType.function => "fn",
+            TokenType.let => "let",
+            TokenType._true => "true",
+            TokenType._false => "false",
+            TokenType._if => "if",
+            TokenType._else => "else",
+            TokenType._return => "return",
+            else => null,
+        };
+
+        return result;
+    }
 };
 
 /// Returns a keyword token if `str` is a valid keyword.
 /// Otherwise, returns an identifier token.
 pub fn keywordOrIdent(str: []const u8) TokenType {
+    const keywords = [_]Token{
+        Token{ .literal = "fn", .type = .function },
+        Token{ .literal = "let", .type = .let },
+        Token{ .literal = "true", .type = ._true },
+        Token{ .literal = "false", .type = ._false },
+        Token{ .literal = "if", .type = ._if },
+        Token{ .literal = "else", .type = ._else },
+        Token{ .literal = "return", .type = ._return },
+    };
+
     for (keywords) |keyword| {
         if (std.mem.eql(u8, str, keyword.literal)) return keyword.type;
     }
