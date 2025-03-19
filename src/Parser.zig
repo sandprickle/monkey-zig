@@ -13,7 +13,13 @@ lexer: *Lexer,
 currentToken: Token,
 peekToken: Token,
 allocator: std.mem.Allocator,
-errors: std.ArrayList(anyerror),
+problems: std.ArrayList(Problem),
+
+pub const Problem = union(enum) {
+    unexpected_token: UnexpectedToken,
+
+    const UnexpectedToken = struct { expected: TokenType, got: TokenType };
+};
 
 pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
     return Self{
@@ -21,7 +27,7 @@ pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
         .currentToken = lexer.nextToken(),
         .peekToken = lexer.nextToken(),
         .allocator = allocator,
-        .errors = std.ArrayList(anyerror).init(allocator),
+        .problems = std.ArrayList(Problem).init(allocator),
     };
 }
 
@@ -29,7 +35,9 @@ pub fn parseProgram(self: *Self) !Program {
     var statements = std.ArrayList(Statement).init(self.allocator);
 
     while (!self.currentTokenIs(.eof)) {
-        try statements.append(try self.parseStatement());
+        if (self.parseStatement()) |statement| {
+            try statements.append(statement);
+        }
         self.nextToken();
     }
 
@@ -48,12 +56,11 @@ fn expectPeek(self: *Self, tokenType: TokenType) !void {
         self.nextToken();
         return;
     }
-
-    switch (tokenType) {
-        .ident => return error.ExpectedIdent,
-        .assign => return error.ExpectedAssign,
-        else => return error.UnexpectedToken,
-    }
+    try self.problems.append(.{ .unexpected_token = .{
+        .expected = tokenType,
+        .got = self.peekToken.type,
+    } });
+    return error.UnexpectedToken;
 }
 
 fn currentTokenIs(self: *Self, tokenType: TokenType) bool {
@@ -64,12 +71,14 @@ fn peekTokenIs(self: *Self, tokenType: TokenType) bool {
     return self.peekToken.type == tokenType;
 }
 
-fn parseStatement(self: *Self) !Statement {
+fn parseStatement(self: *Self) ?Statement {
     switch (self.currentToken.type) {
-        .let => return Statement{
-            .let = try self.parseLetStatement(),
+        .let => {
+            if (self.parseLetStatement()) |let_statement| {
+                return Statement{ .let = let_statement };
+            } else |_| return null;
         },
-        else => return error.NotImplemented,
+        else => return null,
     }
 }
 
@@ -100,31 +109,60 @@ fn parseLetStatement(self: *Self) !LetStatement {
 }
 
 test "let statements" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const expect = std.testing.expect;
     const expectEqualStrings = std.testing.expectEqualStrings;
 
-    const input =
+    // Valid input
+    const input_1 =
         \\let x = 5;
         \\let y = 10;
         \\let foobar = 838383;
     ;
-    var lex = Lexer.init(input);
-    var p = Self.init(&lex, allocator);
-    const program = try p.parseProgram();
+    var lexer_1 = Lexer.init(input_1);
+    var parser_1 = Self.init(&lexer_1, allocator);
+    const program_1 = try parser_1.parseProgram();
 
-    try expect(program.statements.items.len == 3);
+    try expect(program_1.statements.items.len == 3);
 
-    const expectedIdents = [_][]const u8{
+    const expected_idents_1 = [_][]const u8{
         "x",
         "y",
         "foobar",
     };
 
-    for (expectedIdents, 0..) |_, i| {
-        const s = program.statements.items[i];
+    for (expected_idents_1, 0..) |_, i| {
+        const s = program_1.statements.items[i];
         try expectEqualStrings("let", s.tokenLiteral());
         // try expect(@TypeOf(s.let.ident) == ast.Identifier);
         // try expectEqualStrings(name, s.let.ident.value);
+    }
+
+    // Invalid input
+    const input_2 =
+        \\let x 5;
+        \\let = 10;
+        \\let 838383;
+    ;
+
+    var lexer_2 = Lexer.init(input_2);
+    var parser_2 = Self.init(&lexer_2, allocator);
+    const program_2 = try parser_2.parseProgram();
+
+    try expect(parser_2.problems.items.len == 3);
+    try expect(program_2.statements.items.len == 0);
+
+    for (parser_2.problems.items) |problem| {
+        switch (problem) {
+            .unexpected_token => |ut| {
+                std.debug.print("Unexpected token: expected {}, got {}\n", .{
+                    ut.expected,
+                    ut.got,
+                });
+            },
+        }
     }
 }
