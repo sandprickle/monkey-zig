@@ -31,21 +31,6 @@ pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
     };
 }
 
-pub fn parseProgram(self: *Self) !Program {
-    var statements = std.ArrayList(Statement).init(self.allocator);
-
-    while (!self.currentTokenIs(.eof)) {
-        if (self.parseStatement()) |statement| {
-            try statements.append(statement);
-        }
-        self.nextToken();
-    }
-
-    return Program{
-        .statements = statements,
-    };
-}
-
 fn nextToken(self: *Self) void {
     self.currentToken = self.peekToken;
     self.peekToken = self.lexer.nextToken();
@@ -71,14 +56,28 @@ fn peekTokenIs(self: *Self, tokenType: TokenType) bool {
     return self.peekToken.type == tokenType;
 }
 
-fn parseStatement(self: *Self) ?Statement {
+pub fn parseProgram(self: *Self) !Program {
+    var statements = std.ArrayList(Statement).init(self.allocator);
+
+    while (!self.currentTokenIs(.eof)) {
+        if (self.parseStatement()) |statement| {
+            try statements.append(statement);
+        } else |_| {}
+
+        self.nextToken();
+    }
+
+    return Program{
+        .statements = statements,
+    };
+}
+
+fn parseStatement(self: *Self) !Statement {
     switch (self.currentToken.type) {
         .let => {
-            if (self.parseLetStatement()) |let_statement| {
-                return Statement{ .let = let_statement };
-            } else |_| return null;
+            return Statement{ .let = try self.parseLetStatement() };
         },
-        else => return null,
+        else => return error.NotImplemented,
     }
 }
 
