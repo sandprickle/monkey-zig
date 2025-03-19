@@ -6,6 +6,7 @@ const ast = @import("ast.zig");
 const Statement = ast.Statement;
 const Program = ast.Program;
 const LetStatement = ast.LetStatement;
+const ReturnStatement = ast.ReturnStatement;
 
 const Self = @This();
 
@@ -77,6 +78,9 @@ fn parseStatement(self: *Self) !Statement {
         .let => {
             return Statement{ .let = try self.parseLetStatement() };
         },
+        ._return => {
+            return Statement{ ._return = try self.parseReturnStatement() };
+        },
         else => return error.NotImplemented,
     }
 }
@@ -103,6 +107,22 @@ fn parseLetStatement(self: *Self) !LetStatement {
     return LetStatement{
         .token = letToken,
         .ident = ident,
+        .value = null,
+    };
+}
+
+fn parseReturnStatement(self: *Self) !ReturnStatement {
+    const returnToken = self.currentToken;
+
+    self.nextToken();
+
+    // TODO: Parse expression
+    while (!self.currentTokenIs(.semicolon)) {
+        self.nextToken();
+    }
+
+    return ReturnStatement{
+        .token = returnToken,
         .value = null,
     };
 }
@@ -163,5 +183,31 @@ test "let statements" {
                 });
             },
         }
+    }
+}
+
+test "return statements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expect = std.testing.expect;
+    const expectEqualStrings = std.testing.expectEqualStrings;
+
+    const input_1 =
+        \\return 5;
+        \\return 10;
+        \\return 998877;
+    ;
+    var lexer_1 = Lexer.init(input_1);
+    var parser_1 = Self.init(&lexer_1, allocator);
+    const program_1 = try parser_1.parseProgram();
+
+    try expect(parser_1.problems.items.len == 0);
+    try expect(program_1.statements.items.len == 3);
+
+    for (program_1.statements.items) |statement| {
+        try expect(std.meta.activeTag(statement) == ._return);
+        try expectEqualStrings("return", statement.tokenLiteral());
     }
 }
