@@ -145,6 +145,7 @@ test "let statements" {
     var parser_1 = Self.init(&lexer_1, allocator);
     const program_1 = try parser_1.parseProgram();
 
+    try expect(parser_1.problems.items.len == 0);
     try expect(program_1.statements.items.len == 3);
 
     const expected_idents_1 = [_][]const u8{
