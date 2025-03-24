@@ -282,7 +282,7 @@ test "parse identifier" {
     const expect = std.testing.expect;
     const expectEqualStrings = std.testing.expectEqualStrings;
 
-    const input = "foobar;";
+    const input = "foobar;jlkjl";
 
     var lexer = Lexer.init(input);
     var parser = Parser.init(&lexer, allocator);
