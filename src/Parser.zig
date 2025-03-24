@@ -7,125 +7,186 @@ const Statement = ast.Statement;
 const Program = ast.Program;
 const LetStatement = ast.LetStatement;
 const ReturnStatement = ast.ReturnStatement;
+const Expression = ast.Expression;
+const ExpressionStatement = ast.ExpressionStatement;
 
-const Self = @This();
+pub const Parser = struct {
+    const Self = @This();
+    const PrefixParseFn = fn (self: *Self) Expression;
+    const InfixParseFn = fn (self: *Self, left: Expression) Expression;
+    const Precedence = enum(u3) {
+        LOWEST = 1,
+        EQUALS,
+        LESSGREATER,
+        SUM,
+        PRODUCT,
+        PREFIX,
+        CALL,
+    };
+    pub const Problem = union(enum) {
+        unexpected_token: UnexpectedToken,
 
-lexer: *Lexer,
-currentToken: Token,
-peekToken: Token,
-allocator: std.mem.Allocator,
-problems: std.ArrayList(Problem),
+        const UnexpectedToken = struct { expected: TokenType, got: TokenType };
+    };
+    lexer: *Lexer,
+    currentToken: Token,
+    peekToken: Token,
+    problems: std.ArrayList(Problem),
+    program: Program,
+    prefixParseFns: std.HashMap(TokenType, PrefixParseFn),
+    infixParseFns: std.HashMap(TokenType, InfixParseFn),
 
-pub const Problem = union(enum) {
-    unexpected_token: UnexpectedToken,
+    pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
+        const parser = Self{
+            .lexer = lexer,
+            .currentToken = lexer.nextToken(),
+            .peekToken = lexer.nextToken(),
+            .problems = std.ArrayList(Problem).init(allocator),
+            .program = Program.init(allocator),
+            .prefixParseFns = std.HashMap(TokenType, PrefixParseFn).init(allocator),
+            .infixParseFns = std.HashMap(TokenType, InfixParseFn).init(allocator),
+        };
 
-    const UnexpectedToken = struct { expected: TokenType, got: TokenType };
+        parser.registerPrefix(.ident, parser.parseIdentifier);
+
+        return parser;
+    }
+
+    pub fn parseProgram(self: *Self) !Program {
+        while (!self.currentTokenIs(.eof)) {
+            if (self.parseStatement()) |statement| {
+                try self.program.statements.append(statement);
+            } else |_| {}
+
+            self.nextToken();
+        }
+
+        return self.program;
+    }
+
+    fn registerPrefix(self: *Self, tokenType: TokenType, parseFn: PrefixParseFn) void {
+        try self.prefixParseFns.put(tokenType, parseFn);
+    }
+
+    fn registerInfix(self: *Self, tokenType: TokenType, parseFn: InfixParseFn) void {
+        try self.infixParseFns.put(tokenType, parseFn);
+    }
+
+    fn nextToken(self: *Self) void {
+        self.currentToken = self.peekToken;
+        self.peekToken = self.lexer.nextToken();
+    }
+
+    fn expectPeek(self: *Self, tokenType: TokenType) !void {
+        if (self.peekTokenIs(tokenType)) {
+            self.nextToken();
+            return;
+        }
+        try self.problems.append(.{ .unexpected_token = .{
+            .expected = tokenType,
+            .got = self.peekToken.type,
+        } });
+        return error.UnexpectedToken;
+    }
+
+    fn currentTokenIs(self: *Self, tokenType: TokenType) bool {
+        return self.currentToken.type == tokenType;
+    }
+
+    fn peekTokenIs(self: *Self, tokenType: TokenType) bool {
+        return self.peekToken.type == tokenType;
+    }
+
+    fn parseStatement(self: *Self) !Statement {
+        switch (self.currentToken.type) {
+            .let => {
+                return Statement{ .let = try self.parseLetStatement() };
+            },
+            ._return => {
+                return Statement{ ._return = try self.parseReturnStatement() };
+            },
+            .expression => {
+                return Statement{ .expression = try self.parseExpressionStatement() };
+            },
+        }
+    }
+
+    fn parseLetStatement(self: *Self) !LetStatement {
+        const letToken = self.currentToken;
+
+        try self.expectPeek(.ident);
+
+        const ident = ast.Identifier{
+            .token = self.currentToken,
+            .value = self.currentToken.literal,
+        };
+
+        try self.expectPeek(.assign);
+
+        self.nextToken();
+
+        // TODO: Parse expression
+        while (!self.currentTokenIs(.semicolon)) {
+            self.nextToken();
+        }
+
+        return LetStatement{
+            .token = letToken,
+            .ident = ident,
+            .value = null,
+        };
+    }
+
+    fn parseReturnStatement(self: *Self) !ReturnStatement {
+        const returnToken = self.currentToken;
+
+        self.nextToken();
+
+        // TODO: Parse expression
+        while (!self.currentTokenIs(.semicolon)) {
+            self.nextToken();
+        }
+
+        return ReturnStatement{
+            .token = returnToken,
+            .value = null,
+        };
+    }
+
+    fn parseExpressionStatement(self: *Self) !ExpressionStatement {
+        const exprToken = self.currentToken;
+        const expression = self.parseExpression(.LOWEST);
+
+        if (self.peekTokenIs(.semicolon)) {
+            self.nextToken();
+        }
+
+        return ExpressionStatement{
+            .token = exprToken,
+            .expression = expression,
+        };
+    }
+
+    fn parseExpression(self: *Self, precedence: Precedence) !Expression {
+        _ = precedence;
+
+        const prefixFn = self.prefixParseFns.get(
+            self.currentToken.type,
+        );
+
+        if (prefixFn) |prefix| {
+            const leftExp = prefix(&self);
+            return leftExp;
+        } else return error.ParseFnNotFound;
+    }
+
+    fn parseIdentifier(self: *Self) Expression {
+        return .{ .ident = .{
+            .token = self.currentToken,
+            .value = self.currentToken.literal,
+        } };
+    }
 };
-
-pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
-    return Self{
-        .lexer = lexer,
-        .currentToken = lexer.nextToken(),
-        .peekToken = lexer.nextToken(),
-        .allocator = allocator,
-        .problems = std.ArrayList(Problem).init(allocator),
-    };
-}
-
-fn nextToken(self: *Self) void {
-    self.currentToken = self.peekToken;
-    self.peekToken = self.lexer.nextToken();
-}
-
-fn expectPeek(self: *Self, tokenType: TokenType) !void {
-    if (self.peekTokenIs(tokenType)) {
-        self.nextToken();
-        return;
-    }
-    try self.problems.append(.{ .unexpected_token = .{
-        .expected = tokenType,
-        .got = self.peekToken.type,
-    } });
-    return error.UnexpectedToken;
-}
-
-fn currentTokenIs(self: *Self, tokenType: TokenType) bool {
-    return self.currentToken.type == tokenType;
-}
-
-fn peekTokenIs(self: *Self, tokenType: TokenType) bool {
-    return self.peekToken.type == tokenType;
-}
-
-pub fn parseProgram(self: *Self) !Program {
-    var statements = std.ArrayList(Statement).init(self.allocator);
-
-    while (!self.currentTokenIs(.eof)) {
-        if (self.parseStatement()) |statement| {
-            try statements.append(statement);
-        } else |_| {}
-
-        self.nextToken();
-    }
-
-    return Program{
-        .statements = statements,
-    };
-}
-
-fn parseStatement(self: *Self) !Statement {
-    switch (self.currentToken.type) {
-        .let => {
-            return Statement{ .let = try self.parseLetStatement() };
-        },
-        ._return => {
-            return Statement{ ._return = try self.parseReturnStatement() };
-        },
-        else => return error.NotImplemented,
-    }
-}
-
-fn parseLetStatement(self: *Self) !LetStatement {
-    const letToken = self.currentToken;
-
-    try self.expectPeek(.ident);
-
-    const ident = ast.Identifier{
-        .token = self.currentToken,
-        .value = self.currentToken.literal,
-    };
-
-    try self.expectPeek(.assign);
-
-    self.nextToken();
-
-    // TODO: Parse expression
-    while (!self.currentTokenIs(.semicolon)) {
-        self.nextToken();
-    }
-
-    return LetStatement{
-        .token = letToken,
-        .ident = ident,
-        .value = null,
-    };
-}
-
-fn parseReturnStatement(self: *Self) !ReturnStatement {
-    const returnToken = self.currentToken;
-
-    self.nextToken();
-
-    // TODO: Parse expression
-    while (!self.currentTokenIs(.semicolon)) {
-        self.nextToken();
-    }
-
-    return ReturnStatement{
-        .token = returnToken,
-        .value = null,
-    };
-}
 
 test "let statements" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -142,7 +203,7 @@ test "let statements" {
         \\let foobar = 838383;
     ;
     var lexer_1 = Lexer.init(input_1);
-    var parser_1 = Self.init(&lexer_1, allocator);
+    var parser_1 = Parser.init(&lexer_1, allocator);
     const program_1 = try parser_1.parseProgram();
 
     try expect(parser_1.problems.items.len == 0);
@@ -169,7 +230,7 @@ test "let statements" {
     ;
 
     var lexer_2 = Lexer.init(input_2);
-    var parser_2 = Self.init(&lexer_2, allocator);
+    var parser_2 = Parser.init(&lexer_2, allocator);
     const program_2 = try parser_2.parseProgram();
 
     try expect(parser_2.problems.items.len == 3);
@@ -201,7 +262,7 @@ test "return statements" {
         \\return 998877;
     ;
     var lexer_1 = Lexer.init(input_1);
-    var parser_1 = Self.init(&lexer_1, allocator);
+    var parser_1 = Parser.init(&lexer_1, allocator);
     const program_1 = try parser_1.parseProgram();
 
     try expect(parser_1.problems.items.len == 0);
@@ -210,5 +271,28 @@ test "return statements" {
     for (program_1.statements.items) |statement| {
         try expect(std.meta.activeTag(statement) == ._return);
         try expectEqualStrings("return", statement.tokenLiteral());
+    }
+}
+
+test "parse identifier" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expect = std.testing.expect;
+    const expectEqualStrings = std.testing.expectEqualStrings;
+
+    const input = "foobar;";
+
+    var lexer = Lexer.init(input);
+    var parser = Parser.init(&lexer, allocator);
+    const program = try parser.parseProgram();
+
+    try expect(parser.problems.items.len == 0);
+    try expect(program.statements.items.len == 1);
+
+    for (program.statements.items) |statement| {
+        try expect(std.meta.activeTag(statement) == .expression);
+        try expectEqualStrings("foobar", statement.tokenLiteral());
     }
 }
