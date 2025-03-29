@@ -1,19 +1,15 @@
 const std = @import("std");
-const Lexer = @import("lexer.zig").Lexer;
-const Token = @import("token.zig").Token;
-const TokenType = @import("token.zig").TokenType;
+
 const ast = @import("ast.zig");
 const Statement = ast.Statement;
 const Program = ast.Program;
-const LetStatement = ast.LetStatement;
-const ReturnStatement = ast.ReturnStatement;
 const Expression = ast.Expression;
-const ExpressionStatement = ast.ExpressionStatement;
+const Lexer = @import("lexer.zig").Lexer;
+const Token = @import("token.zig").Token;
+const TokenType = @import("token.zig").TokenType;
 
 pub const Parser = struct {
     const Self = @This();
-    const PrefixParseFn = fn (self: *Self) Expression;
-    const InfixParseFn = fn (self: *Self, left: Expression) Expression;
     const Precedence = enum(u3) {
         LOWEST = 1,
         EQUALS,
@@ -25,7 +21,6 @@ pub const Parser = struct {
     };
     pub const Problem = union(enum) {
         unexpected_token: UnexpectedToken,
-
         const UnexpectedToken = struct { expected: TokenType, got: TokenType };
     };
     lexer: *Lexer,
@@ -33,8 +28,6 @@ pub const Parser = struct {
     peekToken: Token,
     problems: std.ArrayList(Problem),
     program: Program,
-    prefixParseFns: std.HashMap(TokenType, PrefixParseFn),
-    infixParseFns: std.HashMap(TokenType, InfixParseFn),
 
     pub fn init(lexer: *Lexer, allocator: std.mem.Allocator) Self {
         const parser = Self{
@@ -43,33 +36,9 @@ pub const Parser = struct {
             .peekToken = lexer.nextToken(),
             .problems = std.ArrayList(Problem).init(allocator),
             .program = Program.init(allocator),
-            .prefixParseFns = std.HashMap(TokenType, PrefixParseFn).init(allocator),
-            .infixParseFns = std.HashMap(TokenType, InfixParseFn).init(allocator),
         };
 
-        parser.registerPrefix(.ident, parser.parseIdentifier);
-
         return parser;
-    }
-
-    pub fn parseProgram(self: *Self) !Program {
-        while (!self.currentTokenIs(.eof)) {
-            if (self.parseStatement()) |statement| {
-                try self.program.statements.append(statement);
-            } else |_| {}
-
-            self.nextToken();
-        }
-
-        return self.program;
-    }
-
-    fn registerPrefix(self: *Self, tokenType: TokenType, parseFn: PrefixParseFn) void {
-        try self.prefixParseFns.put(tokenType, parseFn);
-    }
-
-    fn registerInfix(self: *Self, tokenType: TokenType, parseFn: InfixParseFn) void {
-        try self.infixParseFns.put(tokenType, parseFn);
     }
 
     fn nextToken(self: *Self) void {
@@ -97,6 +66,22 @@ pub const Parser = struct {
         return self.peekToken.type == tokenType;
     }
 
+    // === PARSING ===
+
+    /// Iterate over tokens from the lexer to construct a program
+    pub fn parseProgram(self: *Self) !Program {
+        while (!self.currentTokenIs(.eof)) {
+            if (self.parseStatement()) |statement| {
+                try self.program.statements.append(statement);
+            } else |_| {}
+
+            self.nextToken();
+        }
+
+        return self.program;
+    }
+
+    /// Attempt to parse a statement
     fn parseStatement(self: *Self) !Statement {
         switch (self.currentToken.type) {
             .let => {
@@ -105,13 +90,14 @@ pub const Parser = struct {
             ._return => {
                 return Statement{ ._return = try self.parseReturnStatement() };
             },
-            .expression => {
+            else => {
                 return Statement{ .expression = try self.parseExpressionStatement() };
             },
         }
     }
 
-    fn parseLetStatement(self: *Self) !LetStatement {
+    /// Attempt to parse a let statement
+    fn parseLetStatement(self: *Self) !Statement.Let {
         const letToken = self.currentToken;
 
         try self.expectPeek(.ident);
@@ -130,14 +116,15 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return LetStatement{
+        return Statement.Let{
             .token = letToken,
             .ident = ident,
             .value = null,
         };
     }
 
-    fn parseReturnStatement(self: *Self) !ReturnStatement {
+    /// Attempt to parse a return statement
+    fn parseReturnStatement(self: *Self) !Statement.Return {
         const returnToken = self.currentToken;
 
         self.nextToken();
@@ -147,38 +134,48 @@ pub const Parser = struct {
             self.nextToken();
         }
 
-        return ReturnStatement{
+        return Statement.Return{
             .token = returnToken,
             .value = null,
         };
     }
 
-    fn parseExpressionStatement(self: *Self) !ExpressionStatement {
+    /// Attempt to parse an expression statement
+    fn parseExpressionStatement(self: *Self) !Statement.Expr {
         const exprToken = self.currentToken;
-        const expression = self.parseExpression(.LOWEST);
+        const expression = try self.parseExpression(.LOWEST);
 
         if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
-        return ExpressionStatement{
+        return Statement.Expr{
             .token = exprToken,
             .expression = expression,
         };
     }
 
+    // Expression parsing
+
+    /// Attempt to parse an expression
     fn parseExpression(self: *Self, precedence: Precedence) !Expression {
         _ = precedence;
 
-        const prefixFn = self.prefixParseFns.get(
-            self.currentToken.type,
-        );
-
-        if (prefixFn) |prefix| {
-            const leftExp = prefix(&self);
+        if (prefixParseFn(self.currentToken.type)) |parseFn| {
+            const leftExp = parseFn(self);
             return leftExp;
         } else return error.ParseFnNotFound;
     }
+
+    /// Get the prefix parse function for a given token type
+    fn prefixParseFn(tokenType: TokenType) ?(*const fn (*Self) Expression) {
+        return switch (tokenType) {
+            .ident => &Self.parseIdentifier,
+            else => null,
+        };
+    }
+
+    const InfixParseFn = fn (self: *Self, left: Expression) Expression;
 
     fn parseIdentifier(self: *Self) Expression {
         return .{ .ident = .{

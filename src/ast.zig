@@ -3,11 +3,30 @@ const Token = @import("token.zig").Token;
 const TokenType = @import("token.zig").TokenType;
 
 pub const Statement = union(enum) {
-    let: LetStatement,
-    _return: ReturnStatement,
-    expression: ExpressionStatement,
+    const Self = @This();
+    let: Let,
+    _return: Return,
+    expression: Expr,
 
-    pub fn tokenLiteral(self: Statement) []const u8 {
+    /// A statement that assigns a value to an identifier
+    pub const Let = struct {
+        token: Token,
+        ident: Identifier,
+        value: ?Expression,
+    };
+
+    /// A statement that returns a value
+    pub const Return = struct {
+        token: Token,
+        value: ?Expression,
+    };
+
+    pub const Expr = struct {
+        token: Token,
+        expression: Expression,
+    };
+
+    pub fn tokenLiteral(self: Self) []const u8 {
         return switch (self) {
             .let => |let_stmt| let_stmt.token.literal,
             ._return => |return_stmt| return_stmt.token.literal,
@@ -15,79 +34,36 @@ pub const Statement = union(enum) {
         };
     }
     pub fn format(
-        self: @This(),
+        self: Self,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
         switch (self) {
-            .let => |let_stmt| try let_stmt.format(fmt, options, writer),
-            ._return => |return_stmt| try return_stmt.format(fmt, options, writer),
-            .expression => |expr_stmt| try expr_stmt.format(fmt, options, writer),
+            .let => |let_stmt| {
+                try writer.print("{s} {s} = ", .{ let_stmt.token.literal, let_stmt.ident.value });
+                if (let_stmt.value) |value| {
+                    try writer.print("{s}", .{value});
+                }
+                try writer.print(";", .{});
+            },
+            ._return => |return_stmt| {
+                try writer.print("{s} ", .{return_stmt.token.literal});
+                if (return_stmt.value) |value| {
+                    try writer.print("{s}", .{value});
+                }
+                try writer.print(";", .{});
+            },
+            .expression => |expr_stmt| try expr_stmt.expression.format(
+                fmt,
+                options,
+                writer,
+            ),
         }
     }
 };
 
-/// A statement that assigns a value to an identifier
-pub const LetStatement = struct {
-    token: Token,
-    ident: Identifier,
-    value: ?Expression,
-
-    pub fn format(
-        self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
-        try writer.print("{s} {s} = ", .{ self.token.literal, self.ident.value });
-        if (self.value) |value| {
-            try writer.print("{s}", .{value});
-        }
-        try writer.print(";", .{});
-    }
-};
-
-/// A statement that returns a value
-pub const ReturnStatement = struct {
-    token: Token,
-    value: ?Expression,
-
-    pub fn format(
-        self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
-        try writer.print("{s} ", .{self.token.literal});
-        if (self.value) |value| {
-            try writer.print("{s}", .{value});
-        }
-        try writer.print(";", .{});
-    }
-};
-
-pub const ExpressionStatement = struct {
-    token: Token,
-    expression: Expression,
-
-    pub fn format(
-        self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        try self.expression.format(fmt, options, writer);
-    }
-};
-
-const Expression = union(enum) {
+pub const Expression = union(enum) {
     ident: Identifier,
 
     pub fn format(

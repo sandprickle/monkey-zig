@@ -1,10 +1,9 @@
-const token = @import("token.zig");
 const std = @import("std");
-
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 
+const token = @import("token.zig");
 const Token = token.Token;
 const TokenType = token.TokenType;
 
